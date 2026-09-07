@@ -18,12 +18,19 @@ export const MEMBER_SELECT = `
     (SELECT COUNT(*) FROM checkins c WHERE c.member_id = m.id AND c.result = 'granted') AS visits,
     (SELECT MAX(c.scanned_at) FROM checkins c WHERE c.member_id = m.id AND c.result = 'granted') AS last_visit
   FROM members m
-  LEFT JOIN subscriptions s ON s.id = (
-    SELECT s2.id FROM subscriptions s2
-    WHERE s2.member_id = m.id AND s2.status <> 'cancelled'
-    ORDER BY s2.end_date DESC, s2.id DESC
-    LIMIT 1
-  )
+  LEFT JOIN (
+    SELECT * FROM (
+      SELECT
+        s2.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY s2.member_id
+          ORDER BY s2.end_date DESC, s2.id DESC
+        ) AS rn
+      FROM subscriptions s2
+      WHERE s2.status <> 'cancelled'
+    ) ranked
+    WHERE ranked.rn = 1
+  ) s ON s.member_id = m.id
 `;
 
 export type MemberRaw = {
