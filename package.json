@@ -1,0 +1,29 @@
+{
+  "name": "thundergym",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0 -p 3000",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0 -p 3000",
+    "lint": "next lint",
+    "db:setup": "node scripts/setup-db.mjs"
+  },
+  "dependencies": {
+    "bcryptjs": "3.0.2",
+    "html5-qrcode": "2.3.8",
+    "jose": "6.2.12",
+    "mysql2": "3.24.3",
+    "next": "15.5.25",
+    "qrcode": "1.5.4",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.5",
+    "@types/qrcode": "1.5.5",
+    "@types/react": "19.0.7",
+    "@types/react-dom": "19.0.3",
+    "typescript": "5.7.3"
+  }
+}
