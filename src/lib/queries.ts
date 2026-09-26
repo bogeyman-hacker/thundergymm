@@ -1,10 +1,10 @@
 import { q } from "./db";
-import { memberState, type SubRow, type MemberState } from "./subs";
+import { dayOf, today, memberState, type SubRow, type MemberState } from "./subs";
 
 export const MEMBER_SELECT = `
   SELECT
     m.id, m.serial, m.qr_token, m.full_name, m.phone, m.gender,
-    m.birth_date, m.notes, m.status, m.created_at,
+    m.birth_date, m.notes, m.status, m.frozen_at, m.freeze_until, m.created_at,
     s.id              AS sub_id,
     s.plan_label      AS sub_plan,
     s.duration_days   AS sub_days,
@@ -45,6 +45,8 @@ export type MemberRaw = {
   birth_date: string | null;
   notes: string | null;
   status: "active" | "frozen" | "blocked";
+  frozen_at: string | null;
+  freeze_until: string | null;
   created_at: string;
   sub_id: number | null;
   sub_plan: string | null;
@@ -72,6 +74,8 @@ export type MemberDTO = {
   birthDate: string | null;
   notes: string | null;
   memberStatus: "active" | "frozen" | "blocked";
+  frozenAt: string | null;
+  freezeUntil: string | null;
   createdAt: string;
   visits: number;
   lastVisit: string | null;
@@ -122,7 +126,7 @@ export function toSubRow(r: MemberRaw): SubRow | null {
 
 export function shapeMember(r: MemberRaw): MemberDTO {
   const sub = toSubRow(r);
-  const st = memberState(r.status, sub);
+  const st = memberState(r.status, sub, r.status === "frozen" && r.frozen_at ? dayOf(r.frozen_at) : today());
   return {
     id: r.id,
     serial: r.serial,
@@ -133,6 +137,8 @@ export function shapeMember(r: MemberRaw): MemberDTO {
     birthDate: r.birth_date,
     notes: r.notes,
     memberStatus: r.status,
+    frozenAt: r.frozen_at,
+    freezeUntil: r.freeze_until,
     createdAt: r.created_at,
     visits: Number(r.visits ?? 0),
     lastVisit: r.last_visit,

@@ -34,9 +34,13 @@ export default function MemberPage() {
   const [qr, setQr] = useState<string>("");
   const [plans, setPlans] = useState<Plan[]>([]);
   const [renewOpen, setRenewOpen] = useState(false);
+  const [freezeOpen, setFreezeOpen] = useState(false);
+  const [freezeMode, setFreezeMode] = useState<"manual" | "fixed">("manual");
+  const [freezeDays, setFreezeDays] = useState("7");
   const [renewPlan, setRenewPlan] = useState("");
   const [renewDays, setRenewDays] = useState("");
   const [renewPrice, setRenewPrice] = useState("");
+  const [renewPaid, setRenewPaid] = useState("");
   const [busy, setBusy] = useState(false);
   const [waText, setWaText] = useState("");
 
@@ -66,6 +70,7 @@ export default function MemberPage() {
         if (m) {
           setRenewPlan(String(m.id));
           setRenewPrice(String(Number(m.price)));
+          setRenewPaid(String(Number(m.price)));
         }
       }
     })();
@@ -82,12 +87,13 @@ export default function MemberPage() {
     setWaText(txt);
   }, [member, sp, lang]);
 
-  async function setStatus(status: "active" | "frozen" | "blocked") {
+  async function setStatus(status: "active" | "frozen" | "blocked", days?: number | null) {
     setBusy(true);
-    const r = await api.patch(`/api/members/${id}`, { status });
+    const r = await api.patch(`/api/members/${id}`, { status, ...(status === "frozen" ? { freezeDays: days ?? null } : {}) });
     setBusy(false);
     if (r.ok) {
       toast(t("saved"));
+      setFreezeOpen(false);
       load();
     } else toast(r.error, "err");
   }
@@ -104,7 +110,7 @@ export default function MemberPage() {
   async function doRenew(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
-    const payload: any = { price: Number(renewPrice || 0), paid: Number(renewPrice || 0) };
+    const payload: any = { price: Number(renewPrice || 0), paid: Number(renewPaid || 0) };
     if (renewPlan === "custom") {
       payload.durationDays = Number(renewDays);
       payload.planLabel = lang === "ar" ? `مخصص ${renewDays} يوم` : `Custom ${renewDays} days`;
@@ -182,6 +188,15 @@ export default function MemberPage() {
                 <span className="t-muted">{t("col_end")}</span>
                 <b className="num">{member.sub ? fmtDate(member.sub.end) : "—"}</b>
               </div>
+              {member.memberStatus === "frozen" && (
+                <div className="fs-12" style={{ color: "var(--info)" }}>
+                  ❄️ {lang === "ar" ? "المدة متوقفة من" : "Paused since"} {member.frozenAt}
+                  {member.freezeUntil && <> · {lang === "ar" ? "يفك تلقائيًا" : "Auto-resume"} {member.freezeUntil}</>}
+                  <div className="t-muted">{lang === "ar"
+                    ? "تاريخ الانتهاء هيتأخر بعدد أيام التجميد عند الفك"
+                    : "The expiry date will be extended by the paused days on resume"}</div>
+                </div>
+              )}
               <div className="row-b">
                 <span className="t-muted">{t("total_visits")}</span>
                 <b className="num">{member.visits}</b>
@@ -207,7 +222,7 @@ export default function MemberPage() {
                   {t("unfreeze")}
                 </button>
               ) : (
-                <button className="btn btn-outline btn-sm" onClick={() => setStatus("frozen")} disabled={busy}>
+                <button className="btn btn-outline btn-sm" onClick={() => setFreezeOpen(true)} disabled={busy}>
                   <Snowflake />
                   {t("freeze")}
                 </button>
@@ -374,6 +389,33 @@ export default function MemberPage() {
       </div>
 
       {/* ── renew modal ─────────────────────────────────── */}
+      {freezeOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 310, display: "grid", placeItems: "center",
+                      padding: 20, background: "rgba(0,0,0,.7)", backdropFilter: "blur(4px)" }}
+             onClick={(e) => e.target === e.currentTarget && setFreezeOpen(false)}>
+          <form className="card card-pad anim-pop"
+                style={{ width: "min(430px,100%)", background: "var(--elev)" }}
+                onSubmit={(e) => { e.preventDefault(); setStatus("frozen", freezeMode === "manual" ? null : Number(freezeDays)); }}>
+            <div className="row-b"><h3 className="fs-18">❄️ {lang === "ar" ? "تجميد الاشتراك" : "Pause membership"}</h3>
+              <button type="button" className="btn btn-outline btn-sm btn-icon" onClick={() => setFreezeOpen(false)}><X /></button></div>
+            <p className="hint mt-8">{lang === "ar"
+              ? "الأيام والحصص هتقف أثناء التجميد. لما يتفك، تاريخ النهاية هيتأخر بعدد الأيام المجمدة."
+              : "Days and sessions pause. On resume, the expiry date moves forward by the paused days."}</p>
+            <div className="field mt-16"><label className="label">{lang === "ar" ? "طريقة الفك" : "Resume method"}</label>
+              <select className="select" value={freezeMode} onChange={(e) => setFreezeMode(e.target.value as "manual" | "fixed")}>
+                <option value="manual">{lang === "ar" ? "أفكّه بنفسي" : "Manual resume"}</option>
+                <option value="fixed">{lang === "ar" ? "بعد مدة محددة تلقائيًا" : "Automatic after a duration"}</option>
+              </select></div>
+            {freezeMode === "fixed" && <div className="field mt-16"><label className="label">{lang === "ar" ? "عدد أيام التجميد" : "Pause days"}</label>
+              <input className="input num" dir="ltr" type="number" min={1} max={365} required value={freezeDays}
+                     onChange={(e) => setFreezeDays(e.target.value)} /></div>}
+            <div className="row gap-8 mt-16"><button className="btn btn-primary" disabled={busy}>
+              {busy ? <span className="spinner" /> : <Snowflake />}{t("freeze")}</button>
+              <button type="button" className="btn btn-ghost" onClick={() => setFreezeOpen(false)}>{t("cancel")}</button></div>
+          </form>
+        </div>
+      )}
+
       {renewOpen && (
         <div
           className="no-print"
@@ -414,7 +456,7 @@ export default function MemberPage() {
                   onChange={(e) => {
                     setRenewPlan(e.target.value);
                     const p = plans.find((x) => String(x.id) === e.target.value);
-                    if (p) setRenewPrice(String(Number(p.price)));
+                    if (p) { setRenewPrice(String(Number(p.price))); setRenewPaid(String(Number(p.price))); }
                   }}
                 >
                   {plans.map((p) => (
@@ -452,6 +494,14 @@ export default function MemberPage() {
                   value={renewPrice}
                   onChange={(e) => setRenewPrice(e.target.value)}
                 />
+              </div>
+
+              <div className="field">
+                <label className="label">{t("paid")}</label>
+                <input className="input num" type="number" min={0} max={renewPrice || undefined}
+                  step="0.01" dir="ltr" value={renewPaid}
+                  onChange={(e) => setRenewPaid(e.target.value)} />
+                <p className="hint">{lang === "ar" ? "لو دفع جزء فقط، الباقي يظهر في المالية لتسجيله لاحقًا." : "Unpaid balance appears in Finance for later payments."}</p>
               </div>
 
               <button className="btn btn-primary btn-block" disabled={busy}>

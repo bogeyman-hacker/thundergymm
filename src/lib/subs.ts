@@ -36,9 +36,13 @@ export function dayOf(d: string | Date): Date {
   return new Date(Date.UTC(y, m - 1, day));
 }
 
+/** Gym business day, not the UTC day of a Vercel server. */
 export function today(): Date {
-  const n = new Date();
-  return new Date(Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()));
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const value = (key: string) => Number(parts.find((p) => p.type === key)?.value);
+  return new Date(Date.UTC(value("year"), value("month") - 1, value("day")));
 }
 
 export function toISODate(d: Date): string {
@@ -61,6 +65,27 @@ export function daysLeft(endDate: string, from: Date = today()): number {
 
 export function daysUsed(sub: Pick<SubRow, "start_date" | "duration_days" | "end_date">, from: Date = today()): number {
   return Math.max(0, sub.duration_days - daysLeft(sub.end_date, from));
+}
+
+/**
+ * One mid-cycle alert per active session plan when attendance is below half
+ * the plan's expected pace. Example: 30 sessions / 30 days, on day 16 the
+ * member should have attended about 15 times; 7 visits triggers an alert.
+ * On a 15-in-30 plan, 7 visits at mid-cycle does NOT trigger it.
+ */
+export function lowAttendanceDue(
+  sub: Pick<SubRow, "start_date" | "end_date" | "duration_days" | "sessions_total" | "sessions_used" | "status">,
+  alreadyNotified: boolean,
+  from: Date = today()
+): boolean {
+  const duration = Number(sub.duration_days);
+  const total = Number(sub.sessions_total);
+  const used = Number(sub.sessions_used);
+  if (alreadyNotified || sub.status !== "active" || duration < 14 || total <= 0) return false;
+  const elapsed = Math.round((from.getTime() - dayOf(sub.start_date).getTime()) / MS_DAY);
+  if (elapsed < Math.ceil(duration / 2) || elapsed >= duration) return false;
+  if (daysLeft(sub.end_date, from) <= 0 || used >= total) return false;
+  return used * 2 < (elapsed * total) / duration;
 }
 
 /** How many days before expiry the "final" reminder should go out. */
@@ -150,6 +175,7 @@ export type MemberState =
   | "expiring"
   | "expired"
   | "no_subscription"
+  | "not_started"
   | "frozen"
   | "blocked";
 
@@ -186,6 +212,8 @@ export function memberState(
     return { state: "no_subscription", ...base, left: 0, pct: 0 };
 
   // Out of days OR out of sessions → finished.
+  if (from.getTime() < dayOf(sub.start_date).getTime())
+    return { state: "not_started", ...base, left: total, pct: 100 };
   if (left <= 0) return { state: "expired", ...base, left: 0, pct: 0 };
   if (sTotal > 0 && sLeft <= 0) return { state: "expired", ...base, pct: 0 };
 

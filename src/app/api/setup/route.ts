@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { pool, q1, exec } from "@/lib/db";
+import { pool, q, q1, exec } from "@/lib/db";
 import { SCHEMA_SQL } from "@/lib/schema";
 import { splitSql, stripForeignKeys } from "@/lib/sqlsplit";
 import { hashPassword } from "@/lib/auth";
@@ -30,8 +30,11 @@ const MIGRATIONS = [
   `ALTER TABLE plans         ADD COLUMN sessions       INT NOT NULL DEFAULT 0`,
   `ALTER TABLE subscriptions ADD COLUMN sessions_total INT NOT NULL DEFAULT 0`,
   `ALTER TABLE subscriptions ADD COLUMN sessions_used  INT NOT NULL DEFAULT 0`,
+  `ALTER TABLE subscriptions ADD COLUMN low_attendance_notified_at DATETIME NULL`,
   `ALTER TABLE checkins      ADD COLUMN sessions_left  INT NULL`,
   `ALTER TABLE checkins      ADD COLUMN consumed       TINYINT(1) NOT NULL DEFAULT 0`,
+  `ALTER TABLE members       ADD COLUMN frozen_at      DATE NULL`,
+  `ALTER TABLE members       ADD COLUMN freeze_until   DATE NULL`,
 ];
 
 function alreadyApplied(e: any): boolean {
@@ -123,6 +126,39 @@ export const POST = handler(async (req: NextRequest) => {
         [ar, en, days, sessions, price, color, i++]
       );
     }
+  }
+
+  // On an existing gym, never alter prices or member balances. Add the two
+  // missing alternate-day templates INACTIVE at price zero; the owner sets
+  // real prices and enables them before using them for new members.
+  for (const [ar, en, days, sessions, color] of [
+    ["٣ شهور — يوم و يوم", "3 Months — Alt days", 90, 45, "#FB923C"],
+    ["٦ شهور — يوم و يوم", "6 Months — Alt days", 180, 90, "#A78BFA"],
+  ] as [string, string, number, number, string][]) {
+    const found = await q1<{ id: number }>(
+      `SELECT id FROM plans WHERE duration_days=? AND sessions=? LIMIT 1`, [days, sessions]
+    );
+    if (!found) await exec(
+      `INSERT INTO plans (name_ar,name_en,duration_days,sessions,price,color,active,sort_order)
+       VALUES (?,?,?,?,0,?,0,99)`, [ar, en, days, sessions, color]
+    );
+  }
+
+  // Import older subscription payments only once. New payment events are
+  // inserted by the membership routes, so NEVER backfill a sub with events.
+  const oldSubs = await q<{ id: number; member_id: number; paid: string; created_at: string }>(
+    `SELECT id, member_id, paid, created_at FROM subscriptions WHERE paid > 0 ORDER BY member_id, id`
+  );
+  for (const sub of oldSubs) {
+    const existing = await q1<{ id: number }>(`SELECT id FROM payments WHERE subscription_id = ? LIMIT 1`, [sub.id]);
+    if (existing) continue;
+    const first = await q1<{ id: number }>(`SELECT MIN(id) AS id FROM subscriptions WHERE member_id = ?`, [sub.member_id]);
+    await exec(
+      `INSERT IGNORE INTO payments (subscription_id, member_id, kind, amount, paid_at, legacy_key)
+       VALUES (?,?,?,?,?,?)`,
+      [sub.id, sub.member_id, first?.id === sub.id ? "new" : "renewal", sub.paid,
+       sub.created_at, `legacy:${sub.id}`]
+    );
   }
 
   // 3. settings defaults

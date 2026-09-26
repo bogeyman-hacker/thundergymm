@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS members (
   birth_date DATE         NULL,
   notes      TEXT         NULL,
   status     ENUM('active','frozen','blocked') NOT NULL DEFAULT 'active',
+  frozen_at DATE NULL,
+  freeze_until DATE NULL, -- resume date, NULL = manual unfreeze
   created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_members_phone (phone),
   INDEX idx_members_name  (full_name)
@@ -53,6 +55,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   status          ENUM('active','expired','cancelled') NOT NULL DEFAULT 'active',
   sessions_total  INT           NOT NULL DEFAULT 0, -- 0 = unlimited entries
   sessions_used   INT           NOT NULL DEFAULT 0,
+  low_attendance_notified_at DATETIME NULL, -- once per subscription at/after half-time
   mid_notified_at DATETIME      NULL,           -- "half-way" reminder sent
   end_notified_at DATETIME      NULL,           -- "about to expire" reminder sent
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -111,4 +114,82 @@ CREATE TABLE IF NOT EXISTS wa_log (
 CREATE TABLE IF NOT EXISTS settings (
   skey   VARCHAR(60) PRIMARY KEY,
   svalue TEXT NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Business ledger. Cash received is recorded per payment, not inferred from
+-- subscription price; legacy_key ensures safe one-time import of older data.
+CREATE TABLE IF NOT EXISTS payments (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  subscription_id INT NOT NULL,
+  member_id INT NOT NULL,
+  kind ENUM('new','renewal','arrears') NOT NULL,
+  amount DECIMAL(12,2) NOT NULL,
+  paid_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  note VARCHAR(300) NOT NULL DEFAULT '',
+  legacy_key VARCHAR(80) NULL UNIQUE,
+  INDEX idx_pay_date (paid_at),
+  INDEX idx_pay_member (member_id),
+  INDEX idx_pay_sub (subscription_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS staff (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  serial VARCHAR(32) NULL UNIQUE,
+  qr_token CHAR(36) NOT NULL UNIQUE,
+  full_name VARCHAR(160) NOT NULL,
+  phone VARCHAR(30) NOT NULL DEFAULT '',
+  job_title VARCHAR(120) NOT NULL DEFAULT '',
+  monthly_salary DECIMAL(12,2) NOT NULL DEFAULT 0,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS staff_attendance (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  staff_id INT NOT NULL,
+  clock_in DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  clock_out DATETIME NULL,
+  INDEX idx_staff_day (staff_id, clock_in)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS expenses (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  category ENUM('salary','supplies','equipment','utilities','rent','other') NOT NULL,
+  description VARCHAR(250) NOT NULL,
+  amount DECIMAL(12,2) NOT NULL,
+  staff_id INT NULL,
+  paid_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_expense_date (paid_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS products (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(160) NOT NULL,
+  sale_price DECIMAL(12,2) NOT NULL DEFAULT 0,
+  avg_cost DECIMAL(12,4) NOT NULL DEFAULT 0,
+  stock INT NOT NULL DEFAULT 0,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS stock_purchases (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  product_id INT NOT NULL,
+  quantity INT NOT NULL,
+  unit_cost DECIMAL(12,2) NOT NULL,
+  total_cost DECIMAL(12,2) NOT NULL,
+  note VARCHAR(250) NOT NULL DEFAULT '',
+  purchased_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_stock_date (purchased_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS product_sales (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  product_id INT NOT NULL,
+  quantity INT NOT NULL,
+  unit_price DECIMAL(12,2) NOT NULL,
+  total_amount DECIMAL(12,2) NOT NULL,
+  cost_amount DECIMAL(12,2) NOT NULL,
+  sold_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_sales_date (sold_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

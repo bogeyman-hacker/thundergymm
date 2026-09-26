@@ -14,6 +14,8 @@ export const dict = {
     nav_plans: "الباقات",
     nav_reminders: "التذكيرات",
     nav_settings: "الإعدادات",
+    nav_staff: "الموظفين",
+    nav_finance: "المالية والمخزون",
     logout: "تسجيل الخروج",
 
     // landing
@@ -97,6 +99,7 @@ export const dict = {
     st_expiring: "قرب ينتهي",
     st_expired: "منتهي",
     st_no_subscription: "بدون اشتراك",
+    st_not_started: "لم يبدأ بعد",
     st_frozen: "مجمّد",
     st_blocked: "محظور",
 
@@ -268,6 +271,8 @@ export const dict = {
     nav_plans: "Plans",
     nav_reminders: "Reminders",
     nav_settings: "Settings",
+    nav_staff: "Staff",
+    nav_finance: "Finance & inventory",
     logout: "Sign out",
 
     hero_badge: "Phone-based scanning — no hardware",
@@ -346,6 +351,7 @@ export const dict = {
     st_expiring: "Expiring",
     st_expired: "Expired",
     st_no_subscription: "No plan",
+    st_not_started: "Not started",
     st_frozen: "Frozen",
     st_blocked: "Blocked",
 

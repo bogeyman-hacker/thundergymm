@@ -14,6 +14,10 @@ import type { MemberDTO } from "@/lib/queries";
 type Reminder = { kind: string; text: string; link: string; subscriptionId: number };
 
 type ScanResult = {
+  entity?: "staff";
+  staff?: { id: number; serial: string; name: string; jobTitle: string; active: boolean };
+  action?: "checkin" | "checkout";
+  nextAction?: "checkin" | "checkout";
   mode?: "lookup" | "checkin";
   found: boolean;
   granted: boolean;
@@ -108,12 +112,15 @@ export default function ScanPage() {
 
     const res = r as any as ScanResult;
     if (res.granted) {
-      toast(res.consumed ? t("session_deducted") : t("day_registered"), "ok");
+      toast(res.entity === "staff"
+        ? (res.action === "checkout" ? (lang === "ar" ? "تم تسجيل انصراف الموظف" : "Staff clocked out")
+            : (lang === "ar" ? "تم تسجيل حضور الموظف" : "Staff clocked in"))
+        : res.consumed ? t("session_deducted") : t("day_registered"), "ok");
       try {
         navigator.vibrate?.([30, 40, 30]);
       } catch {}
     }
-  }, [committing, mode, t, toast]);
+  }, [committing, mode, lang, t, toast]);
 
   /* ── scanner gun: a global keyboard listener ──────────────── */
   useEffect(() => {
@@ -264,6 +271,7 @@ export default function ScanPage() {
   function reasonText(reason?: string | null) {
     switch (reason) {
       case "expired": return t("reason_expired");
+      case "not_started": return lang === "ar" ? "الاشتراك لم يبدأ بعد" : "Subscription has not started yet";
       case "no_sessions": return t("reason_no_sessions");
       case "none": return t("reason_none");
       case "blocked": return t("reason_blocked");
@@ -439,6 +447,39 @@ export default function ScanPage() {
                 <Refresh />
                 {t("scan_again")}
               </button>
+            </div>
+          ) : result.entity === "staff" ? (
+            <div className={`result ${result.granted ? "ok" : "bad"}`}>
+              <div className="result-ico">{result.granted ? <Check /> : <Alert />}</div>
+              <div className="badge b-active" style={{ marginBottom: 10 }}>
+                {lang === "ar" ? "موظف • حضور وانصراف" : "Staff • attendance"}
+              </div>
+              <h2>{result.staff?.name}</h2>
+              <p className="t-2 fs-13 mono">{result.staff?.serial} · {result.staff?.jobTitle}</p>
+              <p className="mt-16 fs-14">
+                {!result.granted ? (lang === "ar" ? "الموظف غير مفعل" : "Staff is inactive")
+                  : result.duplicate ? (lang === "ar" ? "اتسجل من أقل من دقيقتين — مفيش تكرار" : "Recorded recently — no duplicate")
+                  : !isLookup ? (result.action === "checkout"
+                    ? (lang === "ar" ? "تم تسجيل الانصراف ✅" : "Clock-out recorded ✅")
+                    : (lang === "ar" ? "تم تسجيل الحضور ✅" : "Clock-in recorded ✅"))
+                  : (result.nextAction === "checkout"
+                    ? (lang === "ar" ? "مسجّل حضور — جاهز لتسجيل الانصراف" : "Clocked in — ready to clock out")
+                    : (lang === "ar" ? "جاهز لتسجيل الحضور" : "Ready to clock in"))}
+              </p>
+              <div className="row gap-8 mt-16 wrap" style={{ justifyContent: "center" }}>
+                {result.granted && isLookup && (
+                  <button className="btn btn-primary" onClick={registerDay} disabled={committing}>
+                    {committing ? <span className="spinner" /> : <Check />}
+                    {result.nextAction === "checkout"
+                      ? (lang === "ar" ? "تسجيل انصراف" : "Clock out")
+                      : (lang === "ar" ? "تسجيل حضور" : "Clock in")}
+                  </button>
+                )}
+                <Link className="btn btn-outline" href="/staff">
+                  {lang === "ar" ? "صفحة الموظفين" : "Staff"}
+                </Link>
+                <button className="btn btn-ghost" onClick={reset}><Refresh />{t("scan_again")}</button>
+              </div>
             </div>
           ) : (
             <>

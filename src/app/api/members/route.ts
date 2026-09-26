@@ -37,7 +37,7 @@ export const GET = handler(async (req: NextRequest) => {
       active: ["active"],
       expiring: ["expiring"],
       expired: ["expired"],
-      none: ["no_subscription", "frozen", "blocked"],
+      none: ["no_subscription", "not_started", "frozen", "blocked"],
     };
     const want = map[filter];
     if (want) list = list.filter((m) => want.includes(m.state));
@@ -91,6 +91,7 @@ export const POST = handler(async (req: NextRequest) => {
   if (!planLabel) planLabel = `${durationDays} days`;
 
   const paid = num(b.paid, price);
+  if (price < 0 || paid < 0 || paid > price) return fail("Paid must be between zero and price", 422);
   const startISO = str(b.startDate, 10) || toISODate(today());
   const start = dayOf(startISO);
   const end = addDays(start, durationDays - 1);
@@ -104,7 +105,7 @@ export const POST = handler(async (req: NextRequest) => {
     [serial, qrToken, name, phone, gender, birthDate, notes]
   );
 
-  await exec(
+  const subscription = await exec(
     `INSERT INTO subscriptions
        (member_id, plan_id, plan_label, duration_days, sessions_total, sessions_used,
         start_date, end_date, price, paid, status)
@@ -122,6 +123,13 @@ export const POST = handler(async (req: NextRequest) => {
       dayOf(toISODate(end)) >= today() ? "active" : "expired",
     ]
   );
+
+  if (paid > 0) {
+    await exec(
+      `INSERT INTO payments (subscription_id, member_id, kind, amount)
+       VALUES (?,?,'new',?)`, [subscription.insertId, m.insertId, paid]
+    );
+  }
 
   await notify({
     type: "member_added",

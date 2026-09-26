@@ -7,7 +7,7 @@ import { useI18n, LangToggle } from "./I18nProvider";
 import NotificationBell from "./NotificationBell";
 import { api } from "@/lib/api";
 import {
-  Bolt, Grid, ScanIcon, Users, List, Tag, Whats, Gear, LogOut, Menu, X,
+  Bolt, Grid, ScanIcon, Users, List, Tag, Whats, Gear, LogOut, Menu, X, Wallet, User,
 } from "./Icons";
 
 type Nav = { href: string; key: any; Icon: any; badge?: number };
@@ -48,6 +48,10 @@ export default function Shell({
     { href: "/checkins", key: "nav_checkins", Icon: List },
     { href: "/reminders", key: "nav_reminders", Icon: Whats, badge: dueCount },
     { href: "/plans", key: "nav_plans", Icon: Tag },
+    ...(user.role === "owner" ? [
+      { href: "/staff", key: "nav_staff", Icon: User },
+      { href: "/finance", key: "nav_finance", Icon: Wallet },
+    ] : []),
     { href: "/settings", key: "nav_settings", Icon: Gear },
   ];
 
@@ -72,7 +76,7 @@ export default function Shell({
     { href: "/members", key: "nav_members", Icon: Users },
     { href: "/scan", key: "nav_scan", Icon: ScanIcon, mid: true },
     { href: "/reminders", key: "nav_reminders", Icon: Whats },
-    { href: "/settings", key: "nav_settings", Icon: Gear },
+    { href: user.role === "owner" ? "/finance" : "/settings", key: user.role === "owner" ? "nav_finance" : "nav_settings", Icon: user.role === "owner" ? Wallet : Gear },
   ];
 
   return (

@@ -2,13 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import Link from "next/link";
+import { waLink } from "@/lib/wa";
 import { useI18n } from "./I18nProvider";
-import { Bell as BellIcon, Sound, Mute, Check } from "./Icons";
+import { Bell as BellIcon, Sound, Mute, Check, Whats } from "./Icons";
 
 type Notif = {
   id: number;
   type: string;
   member_id: number | null;
+  member_phone: string | null;
+  member_name: string | null;
   title_ar: string;
   title_en: string;
   body_ar: string;
@@ -163,6 +167,29 @@ export default function NotificationBell() {
                   <div className="grow">
                     <div className="notif-t">{lang === "ar" ? n.title_ar : n.title_en}</div>
                     <div className="notif-b">{lang === "ar" ? n.body_ar : n.body_en}</div>
+                    {n.type === "low_attendance" && n.member_phone && (
+                      <div className="row gap-8 mt-8 wrap">
+                        <a
+                          className="btn btn-wa btn-sm"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          href={waLink(
+                            n.member_phone,
+                            lang === "ar"
+                              ? `أهلاً ${n.member_name ?? ""} 👋\nوحشتنا في ThunderGym! حابين نطمن عليك ونشوف لو في حاجة نقدر نساعدك بيها عشان ترجع لتمرينك 💪`
+                              : `Hi ${n.member_name ?? ""} 👋\nWe miss you at ThunderGym! Just checking in — let us know if there's anything we can do to help you get back to training 💪`
+                          )}
+                        >
+                          <Whats width={14} height={14} />
+                          {lang === "ar" ? "رسالة واتساب جاهزة" : "WhatsApp message"}
+                        </a>
+                        {n.member_id && (
+                          <Link className="btn btn-outline btn-sm" href={`/members/${n.member_id}`}>
+                            {t("open_profile")}
+                          </Link>
+                        )}
+                      </div>
+                    )}
                     <div className="notif-a num">{fmtDateTime(n.created_at)}</div>
                   </div>
                 </div>

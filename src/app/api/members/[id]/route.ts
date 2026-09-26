@@ -5,6 +5,7 @@ import { handler, ok, fail, body, str, int } from "@/lib/http";
 import { fetchMembers } from "@/lib/queries";
 import { normalizePhone } from "@/lib/wa";
 import { sweepExpired } from "@/lib/notify";
+import { freezeMember, unfreezeMember } from "@/lib/freeze";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,6 +39,18 @@ export const PATCH = handler(async (req: NextRequest, ctx: Ctx) => {
   const id = int((await ctx.params).id);
   const b = await body<any>(req);
 
+  // Freezing is a dated pause, not just a display status.
+  if (b.status === "frozen") {
+    const days = b.freezeDays === null || b.freezeDays === undefined || b.freezeDays === ""
+      ? null : int(b.freezeDays);
+    await freezeMember(id, days);
+    const [member] = await fetchMembers(`WHERE m.id = ?`, [id]);
+    return ok({ member });
+  }
+  if (b.status === "active" || b.status === "blocked") {
+    await unfreezeMember(id);
+  }
+
   const sets: string[] = [];
   const params: any[] = [];
 
@@ -47,7 +60,7 @@ export const PATCH = handler(async (req: NextRequest, ctx: Ctx) => {
   if (b.birthDate !== undefined) { sets.push("birth_date = ?"); params.push(str(b.birthDate, 10) || null); }
   if (b.notes !== undefined) { sets.push("notes = ?"); params.push(str(b.notes, 1000) || null); }
   if (b.status !== undefined) {
-    const s = ["active", "frozen", "blocked"].includes(b.status) ? b.status : "active";
+    const s = ["active", "blocked"].includes(b.status) ? b.status : "active";
     sets.push("status = ?"); params.push(s);
   }
 

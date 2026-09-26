@@ -26,8 +26,8 @@ export const GET = handler(async () => {
   );
 
   const revRow = await q1<{ s: string | null }>(
-    `SELECT SUM(paid) AS s FROM subscriptions
-      WHERE YEAR(created_at)=YEAR(CURDATE()) AND MONTH(created_at)=MONTH(CURDATE())`
+    `SELECT SUM(amount) AS s FROM payments
+      WHERE YEAR(paid_at)=YEAR(CURDATE()) AND MONTH(paid_at)=MONTH(CURDATE())`
   );
 
   // last 7 days of check-ins

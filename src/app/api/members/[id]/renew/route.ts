@@ -52,6 +52,7 @@ export const POST = handler(async (req: NextRequest, ctx: Ctx) => {
   if (durationDays < 1) return fail("Duration must be at least 1 day", 422);
   if (!planLabel) planLabel = `${durationDays} days`;
   const paid = num(b.paid, price);
+  if (price < 0 || paid < 0 || paid > price) return fail("Paid must be between zero and price", 422);
 
   // work out the start date
   let start = today();
@@ -83,6 +84,11 @@ export const POST = handler(async (req: NextRequest, ctx: Ctx) => {
       WHERE member_id = ? AND id <> ? AND end_date < CURDATE() AND status = 'active'`,
     [id, r.insertId]
   );
+
+  if (paid > 0) {
+    await exec(`INSERT INTO payments (subscription_id, member_id, kind, amount)
+                VALUES (?,?,'renewal',?)`, [r.insertId, id, paid]);
+  }
 
   await notify({
     type: "renewed",

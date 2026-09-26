@@ -7,6 +7,7 @@ import { dueReminder, toSubRowFromDTO } from "@/lib/scanHelpers";
 import { isSessionPlan } from "@/lib/subs";
 import { buildMessage, waLink } from "@/lib/wa";
 import { getSetting, notify, sweepExpired } from "@/lib/notify";
+import { scanStaff } from "@/lib/staffScan";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,7 +53,11 @@ export const POST = handler(async (req: NextRequest) => {
    */
   const mode: "lookup" | "checkin" = b.mode === "lookup" ? "lookup" : "checkin";
 
-  const parsed = parseCode(str(b.code, 300));
+  const rawCode = str(b.code, 300);
+  const employee = await scanStaff(rawCode, mode);
+  if (employee) return ok(employee);
+
+  const parsed = parseCode(rawCode);
   if (!parsed) {
     return ok({ mode, found: false, granted: false, reason: "unknown" });
   }
@@ -86,6 +91,8 @@ export const POST = handler(async (req: NextRequest) => {
       result = "denied_frozen"; reason = "frozen"; break;
     case "no_subscription":
       result = "denied_none"; reason = "none"; break;
+    case "not_started":
+      result = "denied_none"; reason = "not_started"; break;
     case "expired":
       result = "denied_expired";
       reason = member.isSessionPlan && member.sessionsLeft <= 0 ? "no_sessions" : "expired";
@@ -215,7 +222,7 @@ export const POST = handler(async (req: NextRequest) => {
       titleAr: "محاولة دخول مرفوضة",
       titleEn: "Entry denied",
       bodyAr: `${member.name} (${member.serial}) — ${
-        reason === "expired" ? "الاشتراك منتهي" : reason === "frozen" ? "مجمّد" : reason === "blocked" ? "محظور" : "لا يوجد اشتراك"
+        reason === "expired" ? "الاشتراك منتهي" : reason === "not_started" ? "الاشتراك لم يبدأ بعد" : reason === "frozen" ? "مجمّد" : reason === "blocked" ? "محظور" : "لا يوجد اشتراك"
       }`,
       bodyEn: `${member.name} (${member.serial}) — ${reason}`,
       severity: "danger",
