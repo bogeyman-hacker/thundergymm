@@ -84,10 +84,12 @@ export const POST = handler(async (req: NextRequest) => {
     if (!b.price && b.price !== 0) price = Number(p.price);
     if (sessions < 0) sessions = Number(p.sessions ?? 0);
   }
-  if (sessions < 0) sessions = 0;
+  if (sessions < 0) sessions = durationDays;
 
   if (durationDays < 1) return fail("Duration must be at least 1 day", 422);
   if (durationDays > 3650) return fail("Duration is too long", 422);
+  if (sessions < 1 || sessions > durationDays)
+    return fail("Sessions must be between 1 and duration days", 422);
   if (!planLabel) planLabel = `${durationDays} days`;
 
   const paid = num(b.paid, price);

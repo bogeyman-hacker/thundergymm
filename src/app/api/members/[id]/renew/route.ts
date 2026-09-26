@@ -47,9 +47,11 @@ export const POST = handler(async (req: NextRequest, ctx: Ctx) => {
     if (b.price === undefined || b.price === "") price = Number(p.price);
     if (sessions < 0) sessions = Number(p.sessions ?? 0);
   }
-  if (sessions < 0) sessions = 0;
+  if (sessions < 0) sessions = durationDays;
 
   if (durationDays < 1) return fail("Duration must be at least 1 day", 422);
+  if (sessions < 1 || sessions > durationDays)
+    return fail("Sessions must be between 1 and duration days", 422);
   if (!planLabel) planLabel = `${durationDays} days`;
   const paid = num(b.paid, price);
   if (price < 0 || paid < 0 || paid > price) return fail("Paid must be between zero and price", 422);

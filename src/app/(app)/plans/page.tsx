@@ -24,7 +24,7 @@ export default function PlansPage() {
   const [plans, setPlans] = useState<Plan[] | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [f, setF] = useState({ nameAr: "", nameEn: "", durationDays: "30", sessions: "0", price: "0", color: "#FFC531" });
+  const [f, setF] = useState({ nameAr: "", nameEn: "", durationDays: "30", sessions: "30", price: "0", color: "#FFC531" });
 
   async function load() {
     const r = await api.get<{ plans: Plan[] }>("/api/plans");
@@ -49,7 +49,7 @@ export default function PlansPage() {
     if (r.ok) {
       toast(t("plan_saved"));
       setOpen(false);
-      setF({ nameAr: "", nameEn: "", durationDays: "30", sessions: "0", price: "0", color: "#FFC531" });
+      setF({ nameAr: "", nameEn: "", durationDays: "30", sessions: "30", price: "0", color: "#FFC531" });
       load();
     } else toast(r.error, "err");
   }
@@ -151,13 +151,13 @@ export default function PlansPage() {
                 </div>
                 <div className="field">
                   <label className="label">
-                    {t("sessions_label")} <span className="t-muted">({t("unlimited")} = 0)</span>
+                    {t("sessions_label")} <span className="t-muted">({lang === "ar" ? "إجباري؛ ينتهي الاشتراك بالمدة أو الحصص" : "required; ends by date or sessions"})</span>
                   </label>
                   <input
                     className="input num"
                     type="number"
-                    min={0}
-                    defaultValue={p.sessions ?? 0}
+                    min={1}
+                    defaultValue={p.sessions ?? 1}
                     onBlur={(e) =>
                       Number(e.target.value) !== (p.sessions ?? 0) &&
                       editField(p, "sessions", e.target.value)
@@ -247,12 +247,12 @@ export default function PlansPage() {
                 </div>
                 <div className="field">
                   <label className="label">
-                    {t("sessions_label")} <span className="t-muted">({t("unlimited")} = 0)</span>
+                    {t("sessions_label")} <span className="t-muted">({lang === "ar" ? "إجباري؛ ينتهي الاشتراك بالمدة أو الحصص" : "required; ends by date or sessions"})</span>
                   </label>
                   <input
                     className="input num"
                     type="number"
-                    min={0}
+                    min={1}
                     value={f.sessions}
                     onChange={(e) => setF({ ...f, sessions: e.target.value })}
                   />

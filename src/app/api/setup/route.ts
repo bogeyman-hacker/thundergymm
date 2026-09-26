@@ -9,7 +9,7 @@ import { setSetting } from "@/lib/notify";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** [name_ar, name_en, duration_days, sessions, price, color] — sessions 0 = unlimited */
+/** [name_ar, name_en, duration_days, sessions, price, color] */
 const DEFAULT_PLANS: [string, string, number, number, number, string][] = [
   ["يوم واحد", "Day pass", 1, 1, 60, "#94A3B8"],
   ["أسبوع", "1 Week", 7, 7, 250, "#22D3EE"],
@@ -19,7 +19,7 @@ const DEFAULT_PLANS: [string, string, number, number, number, string][] = [
   ["٣ شهور — يوم و يوم", "3 Months — Alt days", 90, 45, 1300, "#FB923C"],
   ["٦ شهور — كل يوم", "6 Months — Daily", 180, 180, 3200, "#8B7BFF"],
   ["٦ شهور — يوم و يوم", "6 Months — Alt days", 180, 90, 2400, "#A78BFA"],
-  ["سنة — مفتوح", "1 Year — Open", 365, 0, 5500, "#34D399"],
+  ["سنة — كل يوم", "1 Year — Daily", 365, 365, 5500, "#34D399"],
 ];
 
 /**
@@ -144,6 +144,46 @@ export const POST = handler(async (req: NextRequest) => {
     );
   }
 
+  // Every plan now has BOTH a date limit and a session quota. Zero meant
+  // "unlimited" in older releases; preserve price and duration, not that rule.
+  await exec(`UPDATE plans SET sessions=duration_days WHERE sessions=0`);
+  await exec(
+    `UPDATE plans SET name_ar='سنة — كل يوم', name_en='1 Year — Daily'
+       WHERE duration_days=365 AND sessions=365
+         AND (name_ar LIKE '%مفتوح%' OR name_en LIKE '%Open%')`
+  );
+
+  // One-time, idempotent conversion of still-active historical memberships.
+  // Count DISTINCT visit dates, never raw scan events: two scans on one day
+  // must consume one session. Do not change start/end dates or payments.
+  const legacy = await q<{
+    id: number; duration_days: number; plan_sessions: number | null;
+    start_date: string; end_date: string;
+  }>(
+    `SELECT s.id,s.duration_days,p.sessions AS plan_sessions,s.start_date,s.end_date
+       FROM subscriptions s LEFT JOIN plans p ON p.id=s.plan_id
+      WHERE s.status='active' AND s.sessions_total=0`
+  );
+  let quotasBackfilled = 0;
+  for (const sub of legacy) {
+    const total = Math.max(1, Math.min(Number(sub.duration_days),
+      Number(sub.plan_sessions) > 0 ? Number(sub.plan_sessions) : Number(sub.duration_days)));
+    const v = await q1<{ visits: number }>(
+      `SELECT COUNT(DISTINCT DATE(scanned_at)) AS visits FROM checkins
+        WHERE subscription_id=? AND result='granted'
+          AND DATE(scanned_at) BETWEEN ? AND ?`,
+      [sub.id, sub.start_date, sub.end_date]
+    );
+    const used = Math.min(total, Number(v?.visits ?? 0));
+    const r = await exec(
+      `UPDATE subscriptions SET sessions_total=?,sessions_used=?,
+          status=CASE WHEN ? >= ? THEN 'expired' ELSE status END
+        WHERE id=? AND sessions_total=0 AND status='active'`,
+      [total, used, used, total, sub.id]
+    );
+    quotasBackfilled += r.affectedRows;
+  }
+
   // Import older subscription payments only once. New payment events are
   // inserted by the membership routes, so NEVER backfill a sub with events.
   const oldSubs = await q<{ id: number; member_id: number; paid: string; created_at: string }>(
@@ -187,5 +227,5 @@ export const POST = handler(async (req: NextRequest) => {
     created = true;
   }
 
-  return ok({ installed: true, adminCreated: created, migrated });
+  return ok({ installed: true, adminCreated: created, migrated, quotasBackfilled });
 });

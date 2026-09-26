@@ -40,7 +40,7 @@ const statements = sql
   .filter(Boolean);
 for (const stmt of statements) await conn.query(stmt);
 
-// [name_ar, name_en, duration_days, sessions, price, color]  sessions 0 = unlimited
+// [name_ar, name_en, duration_days, sessions, price, color]  sessions must be positive
 const PLANS = [
   ["يوم واحد", "Day pass", 1, 1, 60, "#94A3B8"],
   ["أسبوع", "1 Week", 7, 7, 250, "#22D3EE"],
@@ -50,7 +50,7 @@ const PLANS = [
   ["٣ شهور — يوم و يوم", "3 Months — Alt days", 90, 45, 1300, "#FB923C"],
   ["٦ شهور — كل يوم", "6 Months — Daily", 180, 180, 3200, "#8B7BFF"],
   ["٦ شهور — يوم و يوم", "6 Months — Alt days", 180, 90, 2400, "#A78BFA"],
-  ["سنة — مفتوح", "1 Year — Open", 365, 0, 5500, "#34D399"],
+  ["سنة — كل يوم", "1 Year — Daily", 365, 365, 5500, "#34D399"],
 ];
 
 const [[pc]] = await conn.query("SELECT COUNT(*) AS c FROM plans");

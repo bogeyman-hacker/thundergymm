@@ -25,9 +25,10 @@ export const POST = handler(async (req: NextRequest) => {
   if (!nameAr && !nameEn) return fail("A name is required", 422);
   if (days < 1) return fail("Duration must be at least 1 day", 422);
 
-  // 0 = unlimited entries; anything else is a punch card (e.g. 15 in 30 days)
-  const sessions = Math.max(0, int(b.sessions, 0));
-  if (sessions > days) return fail("Sessions cannot exceed the plan length in days", 422);
+  // Both limits are mandatory: the first of sessions or end date closes entry.
+  const sessions = b.sessions === undefined ? days : int(b.sessions, 0);
+  if (sessions < 1 || sessions > days)
+    return fail("Sessions must be between 1 and the plan length in days", 422);
 
   const r = await exec(
     `INSERT INTO plans (name_ar, name_en, duration_days, sessions, price, color, active, sort_order)
@@ -56,8 +57,18 @@ export const PATCH = handler(async (req: NextRequest) => {
   const p: any[] = [];
   if (b.nameAr !== undefined) { sets.push("name_ar = ?"); p.push(str(b.nameAr, 120)); }
   if (b.nameEn !== undefined) { sets.push("name_en = ?"); p.push(str(b.nameEn, 120)); }
-  if (b.durationDays !== undefined) { sets.push("duration_days = ?"); p.push(Math.max(1, int(b.durationDays, 1))); }
-  if (b.sessions !== undefined) { sets.push("sessions = ?"); p.push(Math.max(0, int(b.sessions, 0))); }
+  if (b.durationDays !== undefined || b.sessions !== undefined) {
+    const original = await q<{ duration_days: number; sessions: number }>(
+      `SELECT duration_days,sessions FROM plans WHERE id=?`, [id]
+    );
+    if (!original.length) return fail("Plan not found", 404);
+    const days = b.durationDays === undefined ? Number(original[0].duration_days) : int(b.durationDays, 0);
+    const sessions = b.sessions === undefined ? Number(original[0].sessions) : int(b.sessions, 0);
+    if (days < 1 || sessions < 1 || sessions > days)
+      return fail("Sessions must be between 1 and duration days", 422);
+    if (b.durationDays !== undefined) { sets.push("duration_days = ?"); p.push(days); }
+    if (b.sessions !== undefined) { sets.push("sessions = ?"); p.push(sessions); }
+  }
   if (b.price !== undefined) { sets.push("price = ?"); p.push(num(b.price, 0)); }
   if (b.color !== undefined) { sets.push("color = ?"); p.push(str(b.color, 20)); }
   if (b.active !== undefined) { sets.push("active = ?"); p.push(b.active ? 1 : 0); }

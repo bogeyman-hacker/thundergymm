@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS plans (
   name_ar       VARCHAR(120)  NOT NULL,
   name_en       VARCHAR(120)  NOT NULL,
   duration_days INT           NOT NULL,
-  sessions      INT           NOT NULL DEFAULT 0,   -- 0 = unlimited entries, >0 = punch card
+  sessions      INT           NOT NULL DEFAULT 0,   -- 0 only for pre-upgrade legacy data; new plans require >0
   price         DECIMAL(10,2) NOT NULL DEFAULT 0,
   color         VARCHAR(20)   NOT NULL DEFAULT '#FFC531',
   active        TINYINT(1)    NOT NULL DEFAULT 1,
@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   price           DECIMAL(10,2) NOT NULL DEFAULT 0,
   paid            DECIMAL(10,2) NOT NULL DEFAULT 0,
   status          ENUM('active','expired','cancelled') NOT NULL DEFAULT 'active',
-  sessions_total  INT           NOT NULL DEFAULT 0, -- 0 = unlimited entries
+  sessions_total  INT           NOT NULL DEFAULT 0, -- 0 only for pre-upgrade legacy data
   sessions_used   INT           NOT NULL DEFAULT 0,
   low_attendance_notified_at DATETIME NULL, -- once per subscription at/after half-time
   mid_notified_at DATETIME      NULL,           -- "half-way" reminder sent
