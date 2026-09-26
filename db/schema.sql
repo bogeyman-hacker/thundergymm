@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS plans (
   name_ar       VARCHAR(120)  NOT NULL,
   name_en       VARCHAR(120)  NOT NULL,
   duration_days INT           NOT NULL,
+  sessions      INT           NOT NULL DEFAULT 0,   -- 0 = unlimited entries, >0 = punch card
   price         DECIMAL(10,2) NOT NULL DEFAULT 0,
   color         VARCHAR(20)   NOT NULL DEFAULT '#FFC531',
   active        TINYINT(1)    NOT NULL DEFAULT 1,
@@ -50,6 +51,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   price           DECIMAL(10,2) NOT NULL DEFAULT 0,
   paid            DECIMAL(10,2) NOT NULL DEFAULT 0,
   status          ENUM('active','expired','cancelled') NOT NULL DEFAULT 'active',
+  sessions_total  INT           NOT NULL DEFAULT 0, -- 0 = unlimited entries
+  sessions_used   INT           NOT NULL DEFAULT 0,
   mid_notified_at DATETIME      NULL,           -- "half-way" reminder sent
   end_notified_at DATETIME      NULL,           -- "about to expire" reminder sent
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -67,6 +70,8 @@ CREATE TABLE IF NOT EXISTS checkins (
   scanned_by      INT      NULL,
   result          ENUM('granted','denied_expired','denied_none','denied_blocked','denied_frozen','denied_duplicate') NOT NULL,
   days_left       INT      NULL,
+  sessions_left   INT      NULL,
+  consumed        TINYINT(1) NOT NULL DEFAULT 0,    -- 1 = a session was deducted
   source          VARCHAR(30) NOT NULL DEFAULT 'mobile_qr',
   CONSTRAINT fk_chk_member FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE,
   INDEX idx_chk_at     (scanned_at),

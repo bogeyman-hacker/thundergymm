@@ -17,5 +17,7 @@ export function toSubRowFromDTO(m: MemberDTO): SubRow {
     status: m.sub!.status as SubRow["status"],
     mid_notified_at: m.sub!.midSent ? "sent" : null,
     end_notified_at: m.sub!.endSent ? "sent" : null,
+    sessions_total: m.sub!.sessionsTotal ?? 0,
+    sessions_used: m.sub!.sessionsUsed ?? 0,
   };
 }

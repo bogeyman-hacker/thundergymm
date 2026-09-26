@@ -7,53 +7,67 @@ import { useToast } from "@/components/Toast";
 import { api } from "@/lib/api";
 import { Avatar, DaysRing, PageHead, StateBadge } from "@/components/ui";
 import {
-  Camera, Check, X, ScanIcon, Whats, Alert, Refresh, QrIcon, ChevronR, ChevronL,
+  Camera, Check, X, ScanIcon, Whats, Alert, Refresh, QrIcon, ChevronR, ChevronL, Clock,
 } from "@/components/Icons";
 import type { MemberDTO } from "@/lib/queries";
 
+type Reminder = { kind: string; text: string; link: string; subscriptionId: number };
+
 type ScanResult = {
+  mode?: "lookup" | "checkin";
   found: boolean;
   granted: boolean;
   duplicate?: boolean;
+  consumed?: boolean;
+  countedToday?: boolean;
+  usesSessions?: boolean;
+  sessionsLeft?: number | null;
   reason?: string | null;
   member?: MemberDTO;
-  reminder?: {
-    kind: string;
-    text: string;
-    link: string;
-    subscriptionId: number;
-  } | null;
+  reminder?: Reminder | null;
 };
 
 const READER_ID = "tg-reader";
+
+/* A barcode gun "types" a whole code in a few ms, then sends Enter.
+ * Anything slower than this between keystrokes is a human at a keyboard. */
+const GUN_MAX_GAP_MS = 120;
+const GUN_MIN_LENGTH = 4;
 
 export default function ScanPage() {
   const { t, lang, dir, fmtDate } = useI18n();
   const toast = useToast();
   const Arrow = dir === "rtl" ? ChevronL : ChevronR;
 
+  const [mode, setMode] = useState<"gun" | "camera">("gun");
   const [running, setRunning] = useState(false);
   const [starting, setStarting] = useState(false);
   const [camErr, setCamErr] = useState("");
   const [result, setResult] = useState<ScanResult | null>(null);
   const [manual, setManual] = useState("");
   const [checking, setChecking] = useState(false);
+  const [committing, setCommitting] = useState(false);
   const [reminderSent, setReminderSent] = useState(false);
   const [cameras, setCameras] = useState<{ id: string; label: string }[]>([]);
   const [camIdx, setCamIdx] = useState(0);
+  const [gunFeed, setGunFeed] = useState("");
 
   const scannerRef = useRef<any>(null);
   const lockRef = useRef(false);
+  const lastCodeRef = useRef("");
 
-  // ── submit a code to the API ────────────────────────────────
-  const submitCode = useCallback(
-    async (code: string) => {
+  /* ── talk to the API ──────────────────────────────────────── */
+
+  /** Identify the member without recording anything. */
+  const lookup = useCallback(
+    async (code: string, source = "usb_scanner") => {
       if (!code || lockRef.current) return;
       lockRef.current = true;
+      lastCodeRef.current = code;
       setChecking(true);
       setReminderSent(false);
 
-      const r = await api.post<ScanResult>("/api/scan", { code, source: "mobile_qr" });
+      const r = await api.post<ScanResult>("/api/scan", { code, source, mode: "lookup" });
       setChecking(false);
 
       if (!r.ok) {
@@ -62,21 +76,103 @@ export default function ScanPage() {
         return;
       }
       setResult(r as any);
-      window.dispatchEvent(new Event("tg:refresh-notifications"));
-
-      // haptics
       try {
-        navigator.vibrate?.(r.granted ? [40] : [70, 60, 70]);
+        navigator.vibrate?.((r as any).granted ? [35] : [70, 60, 70]);
       } catch {}
-
       setTimeout(() => {
         lockRef.current = false;
-      }, 1200);
+      }, 700);
     },
     [toast]
   );
 
-  // ── camera control ──────────────────────────────────────────
+  /** Commit the entry — this is what deducts a session. */
+  const registerDay = useCallback(async () => {
+    const code = lastCodeRef.current;
+    if (!code || committing) return;
+    setCommitting(true);
+
+    const r = await api.post<ScanResult>("/api/scan", {
+      code,
+      source: mode === "camera" ? "mobile_qr" : "usb_scanner",
+      mode: "checkin",
+    });
+    setCommitting(false);
+
+    if (!r.ok) {
+      toast(r.error, "err");
+      return;
+    }
+    setResult(r as any);
+    window.dispatchEvent(new Event("tg:refresh-notifications"));
+
+    const res = r as any as ScanResult;
+    if (res.granted) {
+      toast(res.consumed ? t("session_deducted") : t("day_registered"), "ok");
+      try {
+        navigator.vibrate?.([30, 40, 30]);
+      } catch {}
+    }
+  }, [committing, mode, t, toast]);
+
+  /* ── scanner gun: a global keyboard listener ──────────────── */
+  useEffect(() => {
+    if (mode !== "gun") return;
+
+    let buf = "";
+    let last = 0;
+    let timer: any = null;
+
+    const flush = () => {
+      const code = buf.trim();
+      buf = "";
+      setGunFeed("");
+      if (code.length >= GUN_MIN_LENGTH) lookup(code, "usb_scanner");
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      // Never hijack real typing in a form field.
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select" || el?.isContentEditable) return;
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+      const now = Date.now();
+      if (now - last > GUN_MAX_GAP_MS) buf = "";
+      last = now;
+
+      if (e.key === "Enter") {
+        if (timer) clearTimeout(timer);
+        if (buf.length >= GUN_MIN_LENGTH) {
+          e.preventDefault();
+          flush();
+        }
+        return;
+      }
+
+      if (e.key.length !== 1) return;
+      buf += e.key;
+      setGunFeed(buf);
+
+      // Some guns are not configured to send Enter — flush on a pause.
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (buf.length >= GUN_MIN_LENGTH) flush();
+        else {
+          buf = "";
+          setGunFeed("");
+        }
+      }, 260);
+    };
+
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (timer) clearTimeout(timer);
+    };
+  }, [mode, lookup]);
+
+  /* ── optional camera fallback ─────────────────────────────── */
   const stop = useCallback(async () => {
     const s = scannerRef.current;
     if (!s) return;
@@ -106,7 +202,7 @@ export default function ScanPage() {
           devices = (await Html5Qrcode.getCameras()) as any;
           setCameras(devices);
         } catch {
-          /* getCameras can fail before permission is granted; fall back below */
+          /* getCameras can fail before permission is granted */
         }
 
         await stop();
@@ -119,134 +215,169 @@ export default function ScanPage() {
             const m = Math.floor(Math.min(vw, vh) * 0.72);
             return { width: m, height: m };
           },
-          aspectRatio: 1,
         };
 
-        const camSource =
-          devices.length > 0 ? { deviceId: { exact: devices[index % devices.length].id } } : { facingMode: "environment" };
+        const camera =
+          devices.length > 0
+            ? { deviceId: { exact: devices[index % devices.length].id } }
+            : { facingMode: "environment" };
 
-        await scanner.start(
-          camSource as any,
-          config,
-          (decoded: string) => {
-            submitCode(decoded);
-          },
-          () => {
-            /* per-frame decode misses — ignore */
-          }
-        );
-
+        await scanner.start(camera as any, config, (text: string) => lookup(text, "mobile_qr"), () => {});
         setRunning(true);
-      } catch (e: any) {
-        const msg = String(e?.message || e);
-        setCamErr(/permission|NotAllowed/i.test(msg) ? t("cam_denied") : msg);
+      } catch (err: any) {
+        setCamErr(String(err?.message || err) || t("cam_denied"));
       } finally {
         setStarting(false);
       }
     },
-    [camIdx, stop, submitCode, t]
+    [camIdx, lookup, stop, t]
   );
 
-  useEffect(() => () => void stop(), [stop]);
+  useEffect(() => {
+    if (mode !== "camera") stop();
+    return () => {
+      stop();
+    };
+  }, [mode, stop]);
 
-  async function switchCam() {
-    const next = camIdx + 1;
-    setCamIdx(next);
-    await stop();
-    await start(next);
-  }
-
-  async function markReminderSent() {
-    if (!result?.reminder || !result.member) return;
-    const r = await api.post("/api/reminders", {
-      subscriptionId: result.reminder.subscriptionId,
-      memberId: result.member.id,
-      kind: result.reminder.kind,
-      text: result.reminder.text,
-      phone: result.member.phone,
-    });
-    if (r.ok) {
-      setReminderSent(true);
-      toast(t("marked"));
-    }
-  }
-
-  function reset() {
+  /* ── misc ─────────────────────────────────────────────────── */
+  const reset = useCallback(() => {
     setResult(null);
     setManual("");
     setReminderSent(false);
+    lastCodeRef.current = "";
     lockRef.current = false;
+  }, []);
+
+  async function markReminderSent() {
+    const rem = result?.reminder;
+    if (!rem || reminderSent) return;
+    setReminderSent(true);
+    await api.post("/api/reminders", {
+      subscriptionId: rem.subscriptionId,
+      memberId: result!.member!.id,
+      kind: rem.kind,
+      text: rem.text,
+    });
   }
 
-  const reasonText = (reason?: string | null) => {
+  function reasonText(reason?: string | null) {
     switch (reason) {
       case "expired": return t("reason_expired");
+      case "no_sessions": return t("reason_no_sessions");
       case "none": return t("reason_none");
       case "blocked": return t("reason_blocked");
       case "frozen": return t("reason_frozen");
-      case "duplicate": return t("reason_duplicate");
       default: return t("reason_unknown");
     }
-  };
+  }
+
+  const m = result?.member;
+  const uses = !!result?.usesSessions;
+  const isLookup = result?.mode === "lookup";
 
   return (
     <>
-      <PageHead title={t("scan_title")} sub={t("scan_sub")} />
+      <PageHead title={t("scan_title")} sub={mode === "gun" ? t("gun_hint") : t("scan_sub")} />
 
       <div className="scan-grid">
-        {/* ── camera ─────────────────────────────────────── */}
-        <div className="card card-pad anim-up">
-          <div className="scanbox">
-            <div id={READER_ID} style={{ width: "100%", height: "100%" }} />
-            {running && (
-              <div className="scan-frame">
-                <i /><i /><i /><i />
-                <u />
-              </div>
-            )}
-            {!running && (
-              <div className="scan-placeholder">
-                <QrIcon />
-                <div className="fs-13">{starting ? t("loading") : t("scan_sub")}</div>
-              </div>
-            )}
-            {checking && (
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  display: "grid",
-                  placeContent: "center",
-                  background: "rgba(5,7,11,.75)",
-                  backdropFilter: "blur(3px)",
-                }}
-              >
-                <span className="spinner" style={{ width: 34, height: 34, color: "var(--gold)" }} />
-              </div>
-            )}
+        {/* ── input side ───────────────────────────────── */}
+        <div className="card card-pad">
+          <div className="row-b" style={{ marginBottom: 14 }}>
+            <b className="fs-14">{mode === "gun" ? t("gun_title") : t("scan_title")}</b>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setMode(mode === "gun" ? "camera" : "gun")}
+            >
+              {mode === "gun" ? <Camera /> : <ScanIcon />}
+              {mode === "gun" ? t("use_camera") : t("use_gun")}
+            </button>
           </div>
 
-          <div className="row gap-10 wrap mt-16">
-            {!running ? (
-              <button className="btn btn-primary grow" onClick={() => start()} disabled={starting}>
-                {starting ? <span className="spinner" /> : <Camera />}
-                {t("start_cam")}
-              </button>
-            ) : (
-              <>
-                <button className="btn btn-ghost grow" onClick={stop}>
-                  <X />
-                  {t("stop_cam")}
-                </button>
-                {cameras.length > 1 && (
-                  <button className="btn btn-outline" onClick={switchCam}>
-                    <Refresh />
-                    {t("switch_cam")}
+          {mode === "gun" ? (
+            <div
+              className="col"
+              style={{
+                alignItems: "center",
+                justifyContent: "center",
+                minHeight: 240,
+                textAlign: "center",
+                border: "1px dashed var(--line)",
+                borderRadius: 14,
+                padding: "26px 18px",
+                background: "rgba(255,255,255,.02)",
+              }}
+            >
+              <div
+                style={{
+                  width: 62, height: 62, borderRadius: "50%",
+                  display: "grid", placeItems: "center",
+                  background: "var(--accent-soft)", color: "var(--accent)",
+                  marginBottom: 14,
+                  animation: checking ? "none" : "tgPulse 1.9s ease-in-out infinite",
+                }}
+              >
+                <ScanIcon width={28} height={28} />
+              </div>
+
+              <b className="fs-15">{checking ? t("gun_reading") : t("gun_ready")}</b>
+              <p className="fs-13 t-2 mt-8" style={{ maxWidth: 320 }}>
+                {t("gun_hint")}
+              </p>
+
+              <div
+                className="mono fs-13 mt-16"
+                dir="ltr"
+                style={{
+                  minHeight: 34, minWidth: 190,
+                  display: "grid", placeItems: "center",
+                  padding: "7px 14px", borderRadius: 9,
+                  background: "rgba(255,255,255,.05)",
+                  border: "1px solid var(--line)",
+                  color: gunFeed ? "var(--accent)" : "var(--text-muted)",
+                  letterSpacing: gunFeed ? ".08em" : 0,
+                }}
+              >
+                {gunFeed || t("gun_listening")}
+              </div>
+
+              <style>{`@keyframes tgPulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.09);opacity:.72}}`}</style>
+            </div>
+          ) : (
+            <>
+              <div className="scanbox">
+                <div id={READER_ID} />
+              </div>
+
+              <div className="row gap-8 mt-16 wrap">
+                {!running ? (
+                  <button className="btn btn-primary grow" onClick={() => start()} disabled={starting}>
+                    {starting ? <span className="spinner" /> : <Camera />}
+                    {t("start_cam")}
+                  </button>
+                ) : (
+                  <button className="btn btn-ghost grow" onClick={stop}>
+                    <X />
+                    {t("stop_cam")}
                   </button>
                 )}
-              </>
-            )}
-          </div>
+                {cameras.length > 1 && running && (
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      const n = (camIdx + 1) % cameras.length;
+                      setCamIdx(n);
+                      start(n);
+                    }}
+                  >
+                    <Refresh />
+                  </button>
+                )}
+              </div>
+
+              <p className="hint mt-8">{t("cam_optional")}</p>
+            </>
+          )}
 
           {camErr && (
             <div
@@ -275,12 +406,12 @@ export default function ScanPage() {
                 value={manual}
                 onChange={(e) => setManual(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") submitCode(manual);
+                  if (e.key === "Enter") lookup(manual, "manual");
                 }}
               />
               <button
                 className="btn btn-ghost"
-                onClick={() => submitCode(manual)}
+                onClick={() => lookup(manual, "manual")}
                 disabled={!manual || checking}
               >
                 <ScanIcon />
@@ -290,20 +421,18 @@ export default function ScanPage() {
           </div>
         </div>
 
-        {/* ── result ─────────────────────────────────────── */}
+        {/* ── result side ──────────────────────────────── */}
         <div className="col gap-16">
           {!result ? (
             <div className="card card-pad" style={{ minHeight: 260, display: "grid", placeContent: "center" }}>
               <div className="empty">
                 <ScanIcon width={44} height={44} style={{ margin: "0 auto 12px", opacity: 0.28 }} />
-                {t("scan_sub")}
+                {mode === "gun" ? t("gun_listening") : t("scan_sub")}
               </div>
             </div>
           ) : !result.found ? (
             <div className="result bad">
-              <div className="result-ico">
-                <X />
-              </div>
+              <div className="result-ico"><X /></div>
               <h2>{t("access_denied")}</h2>
               <p className="t-2">{t("reason_unknown")}</p>
               <button className="btn btn-ghost mt-16" onClick={reset}>
@@ -313,59 +442,101 @@ export default function ScanPage() {
             </div>
           ) : (
             <>
-              <div
-                className={`result ${
-                  result.granted ? (result.member!.state === "expiring" ? "warn" : "ok") : "bad"
-                }`}
-              >
+              <div className={`result ${result.granted ? (m!.state === "expiring" ? "warn" : "ok") : "bad"}`}>
                 <div className="result-ico">{result.granted ? <Check /> : <Alert />}</div>
                 <h2>{result.granted ? t("access_granted") : t("access_denied")}</h2>
                 <p className="t-2 fs-13">
                   {result.duplicate
                     ? t("reason_duplicate")
                     : result.granted
-                    ? result.member!.sub?.plan
+                    ? m!.sub?.plan
                     : reasonText(result.reason)}
                 </p>
 
                 <div className="mt-16" style={{ display: "grid", placeItems: "center" }}>
                   <DaysRing
-                    left={result.member!.daysLeft}
-                    total={result.member!.totalDays}
-                    state={result.member!.state}
+                    left={uses ? m!.sessionsLeft : m!.daysLeft}
+                    total={uses ? m!.sessionsTotal : m!.totalDays}
+                    state={m!.state}
                   />
                 </div>
 
+                {/* sessions balance */}
+                {uses && (
+                  <div className="fs-13 mt-8">
+                    <b className="num" style={{ color: "var(--accent)" }}>
+                      {m!.sessionsLeft}
+                    </b>{" "}
+                    <span className="t-2">
+                      {t("sessions_of")} <span className="num">{m!.sessionsTotal}</span> {t("sessions_label")}
+                    </span>
+                  </div>
+                )}
+
                 <div className="row gap-12 mt-16" style={{ justifyContent: "center" }}>
-                  <Avatar name={result.member!.name} gender={result.member!.gender} />
+                  <Avatar name={m!.name} gender={m!.gender} />
                   <div style={{ textAlign: "start" }}>
-                    <div className="fw-7 fs-18">{result.member!.name}</div>
+                    <div className="fw-7 fs-18">{m!.name}</div>
                     <div className="fs-12 t-muted mono">
-                      {result.member!.serial} · {result.member!.phone}
+                      {m!.serial} · {m!.phone}
                     </div>
                   </div>
                 </div>
 
-                {result.member!.sub && (
+                {m!.sub && (
                   <div className="fs-12 t-muted mt-8 num">
-                    {t("col_end")}: {fmtDate(result.member!.sub.end)}
+                    {t("col_end")}: {fmtDate(m!.sub.end)}
+                    {" · "}
+                    <span className="num">{m!.daysLeft}</span> {t("days_label")}
                   </div>
                 )}
 
                 <div className="row gap-8 mt-16" style={{ justifyContent: "center" }}>
-                  <StateBadge state={result.member!.state} />
+                  <StateBadge state={m!.state} />
+                  {result.countedToday && (
+                    <span className="badge b-expiring plain">
+                      <Clock width={12} height={12} style={{ verticalAlign: -2, marginInlineEnd: 4 }} />
+                      {t("already_today")}
+                    </span>
+                  )}
                 </div>
 
+                {/* ── the two action buttons ─────────────── */}
                 <div className="row gap-8 mt-16 wrap" style={{ justifyContent: "center" }}>
+                  <Link href={`/members/${m!.id}`} className="btn btn-outline">
+                    <QrIcon />
+                    {t("btn_details")}
+                  </Link>
+
+                  {result.granted && isLookup && (
+                    <button
+                      className="btn btn-primary"
+                      onClick={registerDay}
+                      disabled={committing}
+                    >
+                      {committing ? <span className="spinner" /> : <Check />}
+                      {committing ? t("registering") : t("btn_register_day")}
+                    </button>
+                  )}
+
                   <button className="btn btn-ghost" onClick={reset}>
                     <Refresh />
                     {t("scan_again")}
                   </button>
-                  <Link href={`/members/${result.member!.id}`} className="btn btn-outline">
-                    {t("open_profile")}
-                    <Arrow />
-                  </Link>
                 </div>
+
+                {isLookup && result.granted && (
+                  <p className="hint mt-8">
+                    {result.countedToday ? t("already_today_hint") : t("no_deduct_note")}
+                  </p>
+                )}
+
+                {result.consumed && (
+                  <p className="fs-13 mt-8" style={{ color: "var(--ok)" }}>
+                    <Check width={14} height={14} style={{ verticalAlign: -2, marginInlineEnd: 5 }} />
+                    {t("session_deducted")}
+                  </p>
+                )}
               </div>
 
               {/* reminder */}
@@ -416,11 +587,7 @@ export default function ScanPage() {
                       <Whats />
                       {t("open_wa")}
                     </a>
-                    <button
-                      className="btn btn-outline"
-                      onClick={markReminderSent}
-                      disabled={reminderSent}
-                    >
+                    <button className="btn btn-outline" onClick={markReminderSent} disabled={reminderSent}>
                       <Check />
                       {reminderSent ? t("marked") : t("mark_sent")}
                     </button>

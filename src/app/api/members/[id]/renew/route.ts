@@ -32,16 +32,22 @@ export const POST = handler(async (req: NextRequest, ctx: Ctx) => {
   let planLabel = str(b.planLabel, 120);
   let price = num(b.price, 0);
 
+  let sessions = b.sessions === undefined ? -1 : Math.max(0, int(b.sessions, 0));
+
   if (planId) {
-    const p = await q1<{ name_ar: string; name_en: string; duration_days: number; price: string }>(
-      `SELECT name_ar, name_en, duration_days, price FROM plans WHERE id = ?`,
+    const p = await q1<{
+      name_ar: string; name_en: string; duration_days: number; sessions: number; price: string;
+    }>(
+      `SELECT name_ar, name_en, duration_days, sessions, price FROM plans WHERE id = ?`,
       [planId]
     );
     if (!p) return fail("Plan not found", 422);
     durationDays = durationDays || p.duration_days;
     planLabel = planLabel || `${p.name_ar} / ${p.name_en}`;
     if (b.price === undefined || b.price === "") price = Number(p.price);
+    if (sessions < 0) sessions = Number(p.sessions ?? 0);
   }
+  if (sessions < 0) sessions = 0;
 
   if (durationDays < 1) return fail("Duration must be at least 1 day", 422);
   if (!planLabel) planLabel = `${durationDays} days`;
@@ -65,9 +71,10 @@ export const POST = handler(async (req: NextRequest, ctx: Ctx) => {
 
   const r = await exec(
     `INSERT INTO subscriptions
-       (member_id, plan_id, plan_label, duration_days, start_date, end_date, price, paid, status)
-     VALUES (?,?,?,?,?,?,?,?, 'active')`,
-    [id, planId, planLabel, durationDays, toISODate(start), toISODate(end), price, paid]
+       (member_id, plan_id, plan_label, duration_days, sessions_total, sessions_used,
+        start_date, end_date, price, paid, status)
+     VALUES (?,?,?,?,?,0,?,?,?,?, 'active')`,
+    [id, planId, planLabel, durationDays, sessions, toISODate(start), toISODate(end), price, paid]
   );
 
   // an active renewal supersedes an expired record's reminders

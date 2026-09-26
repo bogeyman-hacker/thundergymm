@@ -40,23 +40,27 @@ const statements = sql
   .filter(Boolean);
 for (const stmt of statements) await conn.query(stmt);
 
+// [name_ar, name_en, duration_days, sessions, price, color]  sessions 0 = unlimited
 const PLANS = [
-  ["يوم واحد", "Day pass", 1, 60, "#94A3B8"],
-  ["أسبوع", "1 Week", 7, 250, "#22D3EE"],
-  ["شهر", "1 Month", 30, 700, "#FFC531"],
-  ["٣ شهور", "3 Months", 90, 1800, "#F59E0B"],
-  ["٦ شهور", "6 Months", 180, 3200, "#8B7BFF"],
-  ["سنة", "1 Year", 365, 5500, "#34D399"],
+  ["يوم واحد", "Day pass", 1, 1, 60, "#94A3B8"],
+  ["أسبوع", "1 Week", 7, 7, 250, "#22D3EE"],
+  ["شهر — كل يوم", "1 Month — Daily", 30, 30, 700, "#FFC531"],
+  ["شهر — يوم و يوم", "1 Month — Alt days", 30, 15, 500, "#FBBF24"],
+  ["٣ شهور — كل يوم", "3 Months — Daily", 90, 90, 1800, "#F59E0B"],
+  ["٣ شهور — يوم و يوم", "3 Months — Alt days", 90, 45, 1300, "#FB923C"],
+  ["٦ شهور — كل يوم", "6 Months — Daily", 180, 180, 3200, "#8B7BFF"],
+  ["٦ شهور — يوم و يوم", "6 Months — Alt days", 180, 90, 2400, "#A78BFA"],
+  ["سنة — مفتوح", "1 Year — Open", 365, 0, 5500, "#34D399"],
 ];
 
 const [[pc]] = await conn.query("SELECT COUNT(*) AS c FROM plans");
 if (!pc.c) {
   console.log("→ seeding plans…");
   let i = 0;
-  for (const [ar, en, d, p, c] of PLANS) {
+  for (const [ar, en, d, ses, p, c] of PLANS) {
     await conn.execute(
-      "INSERT INTO plans (name_ar,name_en,duration_days,price,color,sort_order) VALUES (?,?,?,?,?,?)",
-      [ar, en, d, p, c, i++]
+      "INSERT INTO plans (name_ar,name_en,duration_days,sessions,price,color,sort_order) VALUES (?,?,?,?,?,?,?)",
+      [ar, en, d, ses, p, c, i++]
     );
   }
 }

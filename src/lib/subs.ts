@@ -20,6 +20,9 @@ export type SubRow = {
   status: "active" | "expired" | "cancelled";
   mid_notified_at: string | null;
   end_notified_at: string | null;
+  /** 0 = unlimited entry (open plan). >0 = punch-card plan. */
+  sessions_total: number;
+  sessions_used: number;
 };
 
 const MS_DAY = 86_400_000;
@@ -79,13 +82,67 @@ export type ReminderKind = "mid" | "end" | null;
 /** Which reminder (if any) this subscription is due for right now. */
 export function dueReminder(sub: SubRow, from: Date = today()): ReminderKind {
   if (sub.status !== "active") return null;
+
   const left = daysLeft(sub.end_date, from);
   const endT = endThreshold(sub.duration_days);
   const midT = midThreshold(sub.duration_days);
 
-  if (left <= endT && !sub.end_notified_at) return "end";
-  if (left <= midT && left > endT && !sub.mid_notified_at) return "mid";
+  // A punch-card plan can run out of sessions long before its end date,
+  // so evaluate both clocks and fire on whichever is further along.
+  let sEnd = false;
+  let sMid = false;
+  if (isSessionPlan(sub)) {
+    const sl = sessionsLeft(sub);
+    const total = Number(sub.sessions_total);
+    sEnd = sl <= sessionEndThreshold(total);
+    sMid = !sEnd && sl <= sessionMidThreshold(total);
+  }
+
+  if ((left <= endT || sEnd) && !sub.end_notified_at) return "end";
+
+  const midByDays = left <= midT && left > endT;
+  if ((midByDays || sMid) && !sub.mid_notified_at) return "mid";
+
   return null;
+}
+
+/* ── Sessions (جلسات) ──────────────────────────────────────────
+ * A plan can be limited by TIME, by SESSIONS, or by both.
+ *   شهر كل يوم        → 30 sessions / 30 days
+ *   شهر يوم و يوم     → 15 sessions / 30 days
+ *   3 شهور يوم و يوم  → 45 sessions / 90 days
+ *   6 شهور يوم و يوم  → 90 sessions / 180 days
+ * Whichever limit runs out first ends the subscription.
+ * sessions_total = 0 means "unlimited entries until the end date".
+ */
+
+export function isSessionPlan(sub: Pick<SubRow, "sessions_total"> | null): boolean {
+  return !!sub && Number(sub.sessions_total) > 0;
+}
+
+export function sessionsLeft(sub: Pick<SubRow, "sessions_total" | "sessions_used"> | null): number {
+  if (!isSessionPlan(sub)) return 0;
+  return Math.max(0, Number(sub!.sessions_total) - Number(sub!.sessions_used));
+}
+
+/** How few sessions remain before we call the member "expiring". */
+export function sessionEndThreshold(total: number): number {
+  if (total <= 4) return 1;
+  if (total <= 15) return 2;
+  if (total <= 45) return 3;
+  return 5;
+}
+
+/** Half-way point of a punch card, e.g. 15 sessions → 8 left. */
+export function sessionMidThreshold(total: number): number {
+  return Math.max(sessionEndThreshold(total) + 1, Math.ceil(total / 2));
+}
+
+/** Sessions per week implied by the plan — 15 in 30 days ≈ every other day. */
+export function sessionPace(sub: Pick<SubRow, "sessions_total" | "duration_days">): number {
+  const d = Number(sub.duration_days) || 1;
+  const t = Number(sub.sessions_total) || 0;
+  return t > 0 ? Math.round((t / d) * 70) / 10 : 0;
 }
 
 export type MemberState =
@@ -100,17 +157,43 @@ export function memberState(
   memberStatus: "active" | "frozen" | "blocked",
   sub: SubRow | null,
   from: Date = today()
-): { state: MemberState; left: number; total: number; pct: number } {
+): {
+  state: MemberState;
+  left: number;
+  total: number;
+  pct: number;
+  sessionsLeft: number;
+  sessionsTotal: number;
+  sessionsUsed: number;
+} {
   const total = sub?.duration_days ?? 0;
   const left = sub ? daysLeft(sub.end_date, from) : 0;
-  const pct = total > 0 ? Math.min(100, Math.max(0, Math.round((left / total) * 100))) : 0;
 
-  if (memberStatus === "blocked") return { state: "blocked", left, total, pct };
-  if (memberStatus === "frozen") return { state: "frozen", left, total, pct };
-  if (!sub || sub.status === "cancelled") return { state: "no_subscription", left: 0, total, pct: 0 };
-  if (left <= 0) return { state: "expired", left: 0, total, pct: 0 };
-  if (left <= endThreshold(total)) return { state: "expiring", left, total, pct };
-  return { state: "active", left, total, pct };
+  const sTotal = sub ? Number(sub.sessions_total) || 0 : 0;
+  const sUsed = sub ? Number(sub.sessions_used) || 0 : 0;
+  const sLeft = sTotal > 0 ? Math.max(0, sTotal - sUsed) : 0;
+
+  // Progress follows whichever budget is more depleted.
+  const dayPct = total > 0 ? (left / total) * 100 : 0;
+  const sesPct = sTotal > 0 ? (sLeft / sTotal) * 100 : 100;
+  const pct = total > 0 ? Math.min(100, Math.max(0, Math.round(Math.min(dayPct, sesPct)))) : 0;
+
+  const base = { left, total, pct, sessionsLeft: sLeft, sessionsTotal: sTotal, sessionsUsed: sUsed };
+
+  if (memberStatus === "blocked") return { state: "blocked", ...base };
+  if (memberStatus === "frozen") return { state: "frozen", ...base };
+  if (!sub || sub.status === "cancelled")
+    return { state: "no_subscription", ...base, left: 0, pct: 0 };
+
+  // Out of days OR out of sessions → finished.
+  if (left <= 0) return { state: "expired", ...base, left: 0, pct: 0 };
+  if (sTotal > 0 && sLeft <= 0) return { state: "expired", ...base, pct: 0 };
+
+  const lowDays = left <= endThreshold(total);
+  const lowSessions = sTotal > 0 && sLeft <= sessionEndThreshold(sTotal);
+  if (lowDays || lowSessions) return { state: "expiring", ...base };
+
+  return { state: "active", ...base };
 }
 
 /** Pretty duration, e.g. 400 → "1 year 1 month", 9 → "9 days". */
@@ -122,7 +205,13 @@ export function humanDuration(days: number, lang: "ar" | "en"): string {
   const parts: string[] = [];
   const push = (n: number, ar: [string, string, string], en: [string, string]) => {
     if (!n) return;
-    if (lang === "ar") parts.push(n === 1 ? ar[0] : n === 2 ? ar[1] : `${n} ${ar[2]}`);
+    if (lang === "ar") {
+      // Arabic counts: 1 → singular word, 2 → dual, 3-10 → plural, 11+ → singular again.
+      if (n === 1) parts.push(ar[0]);
+      else if (n === 2) parts.push(ar[1]);
+      else if (n <= 10) parts.push(`${n} ${ar[2]}`);
+      else parts.push(`${n} ${ar[0]}`);
+    }
     else parts.push(`${n} ${n === 1 ? en[0] : en[1]}`);
   };
   push(y, ["سنة", "سنتان", "سنوات"], ["year", "years"]);

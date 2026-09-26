@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const GET = handler(async () => {
   await requireSession();
   const rows = await q(
-    `SELECT id, name_ar, name_en, duration_days, price, color, active, sort_order
+    `SELECT id, name_ar, name_en, duration_days, sessions, price, color, active, sort_order
        FROM plans ORDER BY sort_order ASC, duration_days ASC`
   );
   return ok({ plans: rows });
@@ -25,13 +25,18 @@ export const POST = handler(async (req: NextRequest) => {
   if (!nameAr && !nameEn) return fail("A name is required", 422);
   if (days < 1) return fail("Duration must be at least 1 day", 422);
 
+  // 0 = unlimited entries; anything else is a punch card (e.g. 15 in 30 days)
+  const sessions = Math.max(0, int(b.sessions, 0));
+  if (sessions > days) return fail("Sessions cannot exceed the plan length in days", 422);
+
   const r = await exec(
-    `INSERT INTO plans (name_ar, name_en, duration_days, price, color, active, sort_order)
-     VALUES (?,?,?,?,?,?,?)`,
+    `INSERT INTO plans (name_ar, name_en, duration_days, sessions, price, color, active, sort_order)
+     VALUES (?,?,?,?,?,?,?,?)`,
     [
       nameAr || nameEn,
       nameEn || nameAr,
       days,
+      sessions,
       num(b.price, 0),
       str(b.color, 20) || "#FFC531",
       b.active === false ? 0 : 1,
@@ -52,6 +57,7 @@ export const PATCH = handler(async (req: NextRequest) => {
   if (b.nameAr !== undefined) { sets.push("name_ar = ?"); p.push(str(b.nameAr, 120)); }
   if (b.nameEn !== undefined) { sets.push("name_en = ?"); p.push(str(b.nameEn, 120)); }
   if (b.durationDays !== undefined) { sets.push("duration_days = ?"); p.push(Math.max(1, int(b.durationDays, 1))); }
+  if (b.sessions !== undefined) { sets.push("sessions = ?"); p.push(Math.max(0, int(b.sessions, 0))); }
   if (b.price !== undefined) { sets.push("price = ?"); p.push(num(b.price, 0)); }
   if (b.color !== undefined) { sets.push("color = ?"); p.push(str(b.color, 20)); }
   if (b.active !== undefined) { sets.push("active = ?"); p.push(b.active ? 1 : 0); }

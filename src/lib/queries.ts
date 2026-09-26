@@ -15,6 +15,8 @@ export const MEMBER_SELECT = `
     s.status          AS sub_status,
     s.mid_notified_at AS sub_mid,
     s.end_notified_at AS sub_endn,
+    s.sessions_total  AS sub_stot,
+    s.sessions_used   AS sub_sused,
     (SELECT COUNT(*) FROM checkins c WHERE c.member_id = m.id AND c.result = 'granted') AS visits,
     (SELECT MAX(c.scanned_at) FROM checkins c WHERE c.member_id = m.id AND c.result = 'granted') AS last_visit
   FROM members m
@@ -54,6 +56,8 @@ export type MemberRaw = {
   sub_status: "active" | "expired" | "cancelled" | null;
   sub_mid: string | null;
   sub_endn: string | null;
+  sub_stot: number | null;
+  sub_sused: number | null;
   visits: number;
   last_visit: string | null;
 };
@@ -82,11 +86,19 @@ export type MemberDTO = {
     status: string;
     midSent: boolean;
     endSent: boolean;
+    sessionsTotal: number;
+    sessionsUsed: number;
+    sessionsLeft: number;
   } | null;
   state: MemberState;
   daysLeft: number;
   totalDays: number;
   pct: number;
+  /** Punch-card counters, 0 when the plan is time-only. */
+  sessionsLeft: number;
+  sessionsTotal: number;
+  sessionsUsed: number;
+  isSessionPlan: boolean;
 };
 
 export function toSubRow(r: MemberRaw): SubRow | null {
@@ -103,6 +115,8 @@ export function toSubRow(r: MemberRaw): SubRow | null {
     status: (r.sub_status ?? "expired") as SubRow["status"],
     mid_notified_at: r.sub_mid,
     end_notified_at: r.sub_endn,
+    sessions_total: Number(r.sub_stot ?? 0),
+    sessions_used: Number(r.sub_sused ?? 0),
   };
 }
 
@@ -134,12 +148,19 @@ export function shapeMember(r: MemberRaw): MemberDTO {
           status: sub.status,
           midSent: !!sub.mid_notified_at,
           endSent: !!sub.end_notified_at,
+          sessionsTotal: sub.sessions_total,
+          sessionsUsed: sub.sessions_used,
+          sessionsLeft: Math.max(0, sub.sessions_total - sub.sessions_used),
         }
       : null,
     state: st.state,
     daysLeft: st.left,
     totalDays: st.total,
     pct: st.pct,
+    sessionsLeft: st.sessionsLeft,
+    sessionsTotal: st.sessionsTotal,
+    sessionsUsed: st.sessionsUsed,
+    isSessionPlan: st.sessionsTotal > 0,
   };
 }
 

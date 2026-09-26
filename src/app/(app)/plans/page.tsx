@@ -12,6 +12,7 @@ type Plan = {
   name_ar: string;
   name_en: string;
   duration_days: number;
+  sessions: number;
   price: string;
   color: string;
   active: 0 | 1;
@@ -23,7 +24,7 @@ export default function PlansPage() {
   const [plans, setPlans] = useState<Plan[] | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [f, setF] = useState({ nameAr: "", nameEn: "", durationDays: "30", price: "0", color: "#FFC531" });
+  const [f, setF] = useState({ nameAr: "", nameEn: "", durationDays: "30", sessions: "0", price: "0", color: "#FFC531" });
 
   async function load() {
     const r = await api.get<{ plans: Plan[] }>("/api/plans");
@@ -40,6 +41,7 @@ export default function PlansPage() {
       nameAr: f.nameAr,
       nameEn: f.nameEn,
       durationDays: Number(f.durationDays),
+      sessions: Number(f.sessions),
       price: Number(f.price),
       color: f.color,
     });
@@ -47,7 +49,7 @@ export default function PlansPage() {
     if (r.ok) {
       toast(t("plan_saved"));
       setOpen(false);
-      setF({ nameAr: "", nameEn: "", durationDays: "30", price: "0", color: "#FFC531" });
+      setF({ nameAr: "", nameEn: "", durationDays: "30", sessions: "0", price: "0", color: "#FFC531" });
       load();
     } else toast(r.error, "err");
   }
@@ -64,9 +66,10 @@ export default function PlansPage() {
     else toast(r.error, "err");
   }
 
-  async function editField(p: Plan, key: "price" | "duration_days", value: string) {
+  async function editField(p: Plan, key: "price" | "duration_days" | "sessions", value: string) {
     const payload: any = { id: p.id };
     if (key === "price") payload.price = Number(value);
+    else if (key === "sessions") payload.sessions = Number(value);
     else payload.durationDays = Number(value);
     await api.patch("/api/plans", payload);
     load();
@@ -143,6 +146,21 @@ export default function PlansPage() {
                     onBlur={(e) =>
                       Number(e.target.value) !== p.duration_days &&
                       editField(p, "duration_days", e.target.value)
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label className="label">
+                    {t("sessions_label")} <span className="t-muted">({t("unlimited")} = 0)</span>
+                  </label>
+                  <input
+                    className="input num"
+                    type="number"
+                    min={0}
+                    defaultValue={p.sessions ?? 0}
+                    onBlur={(e) =>
+                      Number(e.target.value) !== (p.sessions ?? 0) &&
+                      editField(p, "sessions", e.target.value)
                     }
                   />
                 </div>
@@ -225,6 +243,18 @@ export default function PlansPage() {
                     value={f.durationDays}
                     onChange={(e) => setF({ ...f, durationDays: e.target.value })}
                     required
+                  />
+                </div>
+                <div className="field">
+                  <label className="label">
+                    {t("sessions_label")} <span className="t-muted">({t("unlimited")} = 0)</span>
+                  </label>
+                  <input
+                    className="input num"
+                    type="number"
+                    min={0}
+                    value={f.sessions}
+                    onChange={(e) => setF({ ...f, sessions: e.target.value })}
                   />
                 </div>
                 <div className="field">
